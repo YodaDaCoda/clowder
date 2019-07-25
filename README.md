@@ -26,3 +26,24 @@ check-update  Check whether a service can be updated
 
 Example: clowder multimedia.lidarr update
 ```
+
+## Example setup
+
+Clowder is a primitive script and all the heavy lifting is done by docker-compose. This is intended to be nothing more than a simplistic script to make some commands easier to manage.
+
+Clowder expects you to have a series of files named like `${service}-compose.json` (yes, I wrote it to use json. why? because my brain can't parse yaml).
+
+Example directory structure:
+
+```
+project
+|-clowder
+|-service1-compose.json
+|-service2-compose.json
+|-service3-compose.json
+```
+
+Then run it like
+```
+./clowder service1 list-running
+```
