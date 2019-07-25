@@ -1,0 +1,364 @@
+#!/bin/bash
+
+# script cd to own directory
+self_dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+pushd "$self_dir" >/dev/null
+
+function help() {
+  echo ""
+  echo "$(basename $0)"
+  echo "Manage services/containers with docker-compose"
+  echo ""
+  echo "Provided command will be run against the specified service, or against the entire project if no service is specified."
+  echo ""
+  echo "Usage $(basename $0) [-v] <project-name>[.<service-name>] <command>"
+  echo ""
+  echo "Commands:"
+  echo "list          List all services within a project"
+  echo "list-running  List all running services within a project"
+  echo "up            Create network/volumes/container (as required) and bring service up"
+  echo "down          Stop service and delete container"
+  echo "start         Alias of up"
+  echo "stop          Stop service, without deleting container"
+  echo "pull          Pull container sources"
+  echo "build         Build a container"
+  echo "update        Pull/build/start container"
+  echo "restart       Restart container"
+  echo "rm            Remove stopped container created by service"
+  echo "ps            List running services in a project"
+  echo "check-update  Check whether a service can be updated"
+  echo ""
+  echo "Example: $(basename $0) multimedia.lidarr update"
+  echo ""
+  exit
+}
+
+function error() {
+  local message="${1}"
+
+  echo "$(tput setaf 1)${message}$(tput sgr 0)"
+}
+
+function debug() {
+  local message="${1}"
+
+  if [ ${verbose} -ge 1 ]; then
+    echo "${message}"
+  fi
+}
+
+function checkroot() {
+  if [ "$(whoami)" != "root" ]; then
+    {
+      sudo -n echo "test" >/dev/null 2>&1
+    } && {
+      sudo -n $0 "${@}" && exit
+    } || {
+      echo "This command must be run as root"
+      sudo $0 "${@}" && exit
+    }
+    help
+  else
+    :
+    # echo "I am running as root"
+  fi
+}
+
+function compose_list() {
+  local project="${1}"
+  local service="${2}"
+  local verbose="${3}"
+  local docker_verbose="${4}"
+
+  if [ "${service}" == "" ]; then
+    debug "Listing services in project ${project}"
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; docker-compose -f "${project}-compose.json" config --services)
+  else
+    debug "Listing service ${service} in project ${project}"
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; docker-compose -f "${project}-compose.json" config --services | grep "${service}")
+  fi
+}
+
+function compose_list-running() {
+  local project="${1}"
+  local service="${2}"
+  local verbose="${3}"
+  local docker_verbose="${4}"
+
+  if [ "${service}" == "" ]; then
+    debug "Listing running services in project ${project}"
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; docker ps --filter "label=com.docker.compose.project=${project}" --format="{{.Names}}")
+  else
+    debug "Listing running service ${service} in project ${project}"
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; docker ps --filter "label=com.docker.compose.project=${project}" --filter "name=${service}" --format="{{.Names}}")
+  fi
+}
+
+function compose_up() {
+  local project="${1}"
+  local service="${2}"
+  local verbose="${3}"
+  local docker_verbose="${4}"
+
+  if [ "${service}" == "" ]; then
+    debug "Bringing project ${project} up"
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" up -d)
+  else
+    debug "Bringing service ${project}.${service} up"
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" up -d "${service}")
+  fi
+}
+
+function compose_start() {
+  compose_up "${@}"
+}
+
+function compose_down() {
+  local project="${1}"
+  local service="${2}"
+  local verbose="${3}"
+  local docker_verbose="${4}"
+
+  if [ "${service}" == "" ]; then
+    debug "Bringing project ${project} down"
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" down)
+  else
+    debug "Bringing service ${project}.${service} down"
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" rm -f -s "${service}")
+  fi
+}
+
+function compose_stop() {
+  local project="${1}"
+  local service="${2}"
+  local verbose="${3}"
+  local docker_verbose="${4}"
+
+  if [ "${service}" == "" ]; then
+    debug "Stopping project ${project}"
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" stop "${service}")
+  else
+    debug "Stopping service ${project}.${service}"
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" stop "${service}")
+  fi
+}
+
+function compose_pull() {
+  local project="${1}"
+  local service="${2}"
+  local verbose="${3}"
+  local docker_verbose="${4}"
+
+  if [ "${service}" == "" ]; then
+    debug "Pulling image for project ${project}"
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" pull)
+  else
+    debug "Pulling image for service ${project}.${service}"
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" pull "${service}")
+  fi
+}
+
+function compose_build() {
+  local project="${1}"
+  local service="${2}"
+  local verbose="${3}"
+  local docker_verbose="${4}"
+
+  if [ "${service}" == "" ]; then
+    debug "Building image for project ${project}"
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" build --pull --no-cache)
+  else
+    debug "Building image for service ${project}.${service}"
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" build --pull --no-cache "${service}")
+  fi
+}
+
+function compose_update() {
+  local project="${1}"
+  local service="${2}"
+  local verbose="${3}"
+  local docker_verbose="${4}"
+
+  compose_pull "${project}" "${service}" "${verbose}" \
+  && compose_build "${project}" "${service}" "${verbose}" \
+  && compose_up "${project}" "${service}" "${verbose}"
+}
+
+function compose_restart() {
+  local project="${1}"
+  local service="${2}"
+  local verbose="${3}"
+  local docker_verbose="${4}"
+
+  if [ "${service}" == "" ]; then
+    debug "Restarting project ${project}"
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" restart)
+  else
+    debug "Restarting service ${project}.${service}"
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" restart "${service}")
+  fi
+}
+
+function compose_rm() {
+  local project="${1}"
+  local service="${2}"
+  local verbose="${3}"
+  local docker_verbose="${4}"
+
+  if [ "${service}" == "" ]; then
+    debug "Removing project ${project}"
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" rm)
+  else
+    debug "Removing service ${project}.${service}"
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" rm "${service}")
+  fi
+}
+
+function compose_ps() {
+  local project="${1}"
+  local service="${2}"
+  local verbose="${3}"
+  local docker_verbose="${4}"
+
+  if [ "${service}" == "" ]; then
+    debug "Listing services in project ${project}"
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" ps)
+  else
+    debug "Listing service ${service} in project ${project}"
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" ps "${service}")
+  fi
+}
+
+function compose_check-update() {
+  local project="${1}"
+  # local service="${2}"
+  local verbose="${3}"
+  local docker_verbose="${4}"
+
+  local tag="latest"
+
+  local services="${service}"
+
+  if [ "${services}" == "" ]; then
+    services=$(docker ps --filter "label=com.docker.compose.project=${project}" --format="{{.Names}}")
+  fi
+
+  for service in ${services}; do
+
+    debug "processing service ${service}"
+
+    # exit script on any error
+    set -e
+
+    debug "Finding service image"
+    local image=$(jq -r ".services[\"${service}\"].image" "${project}-compose.json")
+    debug "image: ${image}"
+
+    if [[ "${image}" != *"/"* ]]; then
+      image="library/${image}"
+    fi
+
+    debug "Fetching token"
+    local token=$(curl --silent "https://auth.docker.io/token?scope=repository:$image:pull&service=registry.docker.io" | jq -r '.token')
+
+    debug "Fetching manifest"
+    local manifest=$(curl --silent --header "Accept: application/vnd.docker.distribution.manifest.v2+json" --header "Authorization: Bearer $token" "https://registry-1.docker.io/v2/$image/manifests/$tag")
+    debug "Parsing manifest"
+    local remote_image=$(echo "${manifest}" | jq -r '.config.digest')
+
+    debug "Parsing local image"
+    local local_image=sha256:$(sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" images -q "${service}")
+
+    # stop exit on error
+    set +e
+
+    debug "remote_image  ${remote_image}"
+    debug "local_image   ${local_image}"
+
+    if [ "${remote_image}" != "${local_image}" ]; then
+      echo "Service ${service} can be updated"
+    else
+      echo "Service ${service} is up-to-date"
+    fi
+
+  done
+}
+
+
+checkroot "${@}"
+
+verbose=0
+project=""
+service=""
+command=""
+docker_verbose=""
+
+while getopts ":v" opt; do
+  case ${opt} in
+    v )
+      verbose=$((verbose + 1));;
+    \? )
+      error "Unrecognised option ${opt}"
+      help
+      ;;
+  esac
+done
+shift $((OPTIND -1))
+
+if [ ${verbose} -ge 3 ]; then
+  docker_verbose="--verbose"
+fi
+
+IFS='.' read -ra temp <<< $1
+project=${temp[0]}
+service=${temp[1]}
+command=$2
+
+debug "verbose : true"
+debug "project : ${project}"
+debug "service : ${service}"
+debug "command : ${command}"
+
+if
+     [ "${command}" != "list" ] \
+  && [ "${command}" != "list-running" ] \
+  && [ "${command}" != "up" ] \
+  && [ "${command}" != "down" ] \
+  && [ "${command}" != "start" ] \
+  && [ "${command}" != "stop" ] \
+  && [ "${command}" != "pull" ] \
+  && [ "${command}" != "build" ] \
+  && [ "${command}" != "update" ] \
+  && [ "${command}" != "restart" ] \
+  && [ "${command}" != "rm" ] \
+  && [ "${command}" != "ps" ] \
+  && [ "${command}" != "check-update" ]
+then
+  error "Unrecognised command ${command}"
+  help
+fi
+
+if [ -f "${project}-compose.json" ]; then
+  debug "Found compose file for project ${project}"
+else
+  error "Can't see compose file for service ${project}"
+  help
+fi
+
+# TODO: ensure that the compose file is valid
+# docker-compose -f "${project}-compose.json" config
+# this is not happening right now, because the simple way of doing it is to have two calls to `docker-compose config`
+# but `docker-compose config` seems to take a *long* time when project (-p) is specified
+
+if [ "${service}" != "" ]; then
+  if docker-compose -f "${project}-compose.json" config --services | grep "${service}" > /dev/null; then
+    debug "Found service ${service} in project ${project}"
+  else
+    error "Unable to find service ${service} in project ${project}"
+    help
+  fi
+fi
+
+"compose_${command}" "${project}" "${service}" "${verbose}" "${docker_verbose}"
+
+debug "Done"
