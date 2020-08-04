@@ -22,11 +22,15 @@ function help() {
   echo "stop          Stop service, without deleting container"
   echo "pull          Pull container sources"
   echo "build         Build a container"
-  echo "update        Pull/build/start container"
+  echo "update        Pull/build/start container. If executed on an entire project, updates only running containers"
   echo "restart       Restart container"
+  echo "reload        Shorcut for down && up && log"
+  echo "log           Displays log output from service"
   echo "rm            Remove stopped container created by service"
   echo "ps            Show information about running services in a project"
+  echo "shell         Equivalent to docker exec -it sh"
   echo "check-update  Check whether a service can be updated"
+  echo "clean         Shortcut for \`docker image prune; docker system prune\`"
   echo ""
   echo "Example: $(basename $0) multimedia.lidarr update"
   echo ""
@@ -102,10 +106,10 @@ function compose_up() {
 
   if [ "${service}" == "" ]; then
     debug "Bringing project ${project} up"
-    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" up -d)
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" up -d)
   else
     debug "Bringing service ${project}.${service} up"
-    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" up -d "${service}")
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" up -d "${service}")
   fi
 }
 
@@ -121,10 +125,10 @@ function compose_down() {
 
   if [ "${service}" == "" ]; then
     debug "Bringing project ${project} down"
-    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" down)
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" down)
   else
     debug "Bringing service ${project}.${service} down"
-    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" rm -f -s "${service}")
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" rm -f -s "${service}")
   fi
 }
 
@@ -136,10 +140,10 @@ function compose_stop() {
 
   if [ "${service}" == "" ]; then
     debug "Stopping project ${project}"
-    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" stop "${service}")
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" stop "${service}")
   else
     debug "Stopping service ${project}.${service}"
-    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" stop "${service}")
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" stop "${service}")
   fi
 }
 
@@ -151,10 +155,10 @@ function compose_pull() {
 
   if [ "${service}" == "" ]; then
     debug "Pulling image for project ${project}"
-    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" pull)
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" pull)
   else
     debug "Pulling image for service ${project}.${service}"
-    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" pull "${service}")
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" pull "${service}")
   fi
 }
 
@@ -166,10 +170,10 @@ function compose_build() {
 
   if [ "${service}" == "" ]; then
     debug "Building image for project ${project}"
-    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" build --pull --no-cache)
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" build --pull --no-cache)
   else
     debug "Building image for service ${project}.${service}"
-    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" build --pull --no-cache "${service}")
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" build --pull --no-cache "${service}")
   fi
 }
 
@@ -179,9 +183,22 @@ function compose_update() {
   local verbose="${3}"
   local docker_verbose="${4}"
 
-  compose_pull "${project}" "${service}" "${verbose}" \
-  && compose_build "${project}" "${service}" "${verbose}" \
-  && compose_up "${project}" "${service}" "${verbose}"
+  local services=()
+
+  if [ "${service}" == "" ]; then
+    for i in $(compose_list-running "${project}" "" "${verbose}" "${docker_verbose}"); do
+      services+=("${i}")
+    done
+  else
+    services[0]="${service}"
+  fi
+
+  for service in "${services[@]}"; do
+    compose_pull "${project}" "${service}" "${verbose}" "${docker_verbose}"\
+    && compose_build "${project}" "${service}" "${verbose}" "${docker_verbose}"\
+    && compose_up "${project}" "${service}" "${verbose}" "${docker_verbose}"
+    printf "\n"
+  done
 }
 
 function compose_restart() {
@@ -192,11 +209,39 @@ function compose_restart() {
 
   if [ "${service}" == "" ]; then
     debug "Restarting project ${project}"
-    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" restart)
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" restart)
   else
     debug "Restarting service ${project}.${service}"
-    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" restart "${service}")
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" restart "${service}")
   fi
+}
+
+function compose_log() {
+  local project="${1}"
+  local service="${2}"
+  local verbose="${3}"
+  local docker_verbose="${4}"
+
+  if [ "${service}" == "" ]; then
+    echo "The logs function cannot be run on an entire project. You must specify a service."
+    exit
+  fi
+
+  (if [ ${verbose} -ge 2 ]; then set -x; fi; docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" logs --follow "${service}")
+}
+
+function compose_shell() {
+  local project="${1}"
+  local service="${2}"
+  local verbose="${3}"
+  local docker_verbose="${4}"
+
+  if [ "${service}" == "" ]; then
+    echo "The shell function cannot be run on an entire project. You must specify a service."
+    exit
+  fi
+
+  (if [ ${verbose} -ge 2 ]; then set -x; fi; docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" exec "${service}" sh)
 }
 
 function compose_rm() {
@@ -207,10 +252,10 @@ function compose_rm() {
 
   if [ "${service}" == "" ]; then
     debug "Removing project ${project}"
-    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" rm)
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" rm)
   else
     debug "Removing service ${project}.${service}"
-    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" rm "${service}")
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" rm "${service}")
   fi
 }
 
@@ -222,10 +267,10 @@ function compose_ps() {
 
   if [ "${service}" == "" ]; then
     debug "Listing services in project ${project}"
-    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" ps)
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" ps)
   else
     debug "Listing service ${service} in project ${project}"
-    (if [ ${verbose} -ge 2 ]; then set -x; fi; sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" ps "${service}")
+    (if [ ${verbose} -ge 2 ]; then set -x; fi; docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" ps "${service}")
   fi
 }
 
@@ -267,7 +312,7 @@ function compose_check-update() {
     local remote_image=$(echo "${manifest}" | jq -r '.config.digest')
 
     debug "Parsing local image"
-    local local_image=sha256:$(sudo docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" images -q "${service}")
+    local local_image=sha256:$(docker-compose ${docker_verbose} -p "${project}" -f "${project}-compose.json" images -q "${service}")
 
     # stop exit on error
     set +e
@@ -284,8 +329,20 @@ function compose_check-update() {
   done
 }
 
+function docker_clean() {
+  verbose="${1}"
+  docker_verbose="${2}"
 
-checkroot "${@}"
+  (if [ ${verbose} -ge 2 ]; then set -x; fi; docker image prune --force ${docker_verbose})
+  (if [ ${verbose} -ge 2 ]; then set -x; fi; docker system prune --force ${docker_verbose})
+}
+
+function compose_reload() {
+  compose_down $@ && compose_up $@ && compose_log $@
+}
+
+
+# checkroot "${@}"
 
 verbose=0
 project=""
@@ -309,12 +366,19 @@ if [ ${verbose} -ge 3 ]; then
   docker_verbose="--verbose"
 fi
 
+if [ "$#" -eq 1 ]; then
+  if [ "${1}" == "clean" ]; then
+    docker_clean "${verbose}" "${docker_verbose}"
+    exit
+  fi
+fi
+
 IFS='.' read -ra temp <<< $1
 project=${temp[0]}
 service=${temp[1]}
 command=$2
 
-debug "verbose : true"
+debug "verbose : ${verbose}"
 debug "project : ${project}"
 debug "service : ${service}"
 debug "command : ${command}"
@@ -330,8 +394,11 @@ if
   && [ "${command}" != "build" ] \
   && [ "${command}" != "update" ] \
   && [ "${command}" != "restart" ] \
+  && [ "${command}" != "reload" ] \
+  && [ "${command}" != "log" ] \
   && [ "${command}" != "rm" ] \
   && [ "${command}" != "ps" ] \
+  && [ "${command}" != "shell" ] \
   && [ "${command}" != "check-update" ]
 then
   error "Unrecognised command ${command}"
